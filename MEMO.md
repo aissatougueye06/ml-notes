@@ -303,3 +303,6 @@ b_orig = b - w * mu / sigma
 - Le choix de la métrique décide de la conclusion. Toujours savoir ce qu'on mesure.
 - Nommer les limites de son analyse : périmètre, conditions de mesure, exclusions,
   effets non contrôlés.
+- **Fuite de données** (*data leakage*) : une variable qui contient l'information de
+  la cible d'une façon indisponible au moment de prédire. Symptôme : un R² anormalement
+  élevé. Test : cette variable serait-elle connue *avant* la cible, en situation réelle ?
