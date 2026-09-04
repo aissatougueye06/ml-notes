@@ -8,13 +8,27 @@ leur cause. **Ce qui ne va pas ici** : les principes et le « pourquoi » — il
 `memo-machine-learning.pptx`, à relire d'un bloc.
 
 **Règle d'alimentation** : dès qu'un problème m'a coûté plus de dix minutes, il gagne
-trois lignes ici, au moment où il arrive.
+trois lignes ici, au moment où il arrive. Même chose pour une **décision** tranchée
+dans un projet (une version, une convention) : elle est reportée ici, sinon le carnet
+diverge du code.
+
+**Sommaire** — [1. Messages d'erreur](#1-messages-derreur--cause--correctif) ·
+[2. Mise en place d'un projet](#2-mise-en-place-dun-projet) ·
+[3. Pandas](#3-pandas--gestes-courants) · [4. NumPy](#4-numpy--gestes-courants) ·
+[5. Machine learning](#5-machine-learning--le-socle) ·
+[6. Hygiène de notebook](#6-hygiène-de-notebook) ·
+[7. Algorithmique](#7-algorithmique--repères) ·
+[8. Méthode d'analyse](#8-méthode-danalyse)
 
 ---
 
 ## 1. Messages d'erreur → cause → correctif
 
 Indexés par le **texte exact** du message : c'est ce que j'aurai sous les yeux, pas la cause.
+
+Cette section s'enrichit de moins en moins vite : plus le travail avance, moins les
+erreurs plantent. Les problèmes de modélisation ne lèvent aucune exception — ils
+donnent un chiffre faux. Ils sont donc en §3, §4 (pièges) et §8 (méthode).
 
 ### `zsh: command not found: python`
 Normal sur macOS : seul `python3` est reconnu hors environnement virtuel.
@@ -122,7 +136,7 @@ git add . && git commit -m "<ce que ce commit apporte>" && git push
 ```python
 # Charger et nettoyer
 df = pd.read_csv("data/f.csv", sep=";", encoding="latin-1")
-obj = df.select_dtypes(include="object").columns   # ou "str" selon la version
+obj = df.select_dtypes(include="str").columns      # "object" avant pandas 3
 df[obj] = df[obj].apply(lambda s: s.str.strip())
 
 # Découvrir
@@ -146,6 +160,13 @@ df.groupby("cat")[["a", "b"]].count()   # croiser avec les manquantes
 # Inspecter
 df.nlargest(10, "col")
 df.drop_duplicates(subset=[...])
+
+# Encoder une catégorique en indicatrices
+pd.get_dummies(df[num + cat], columns=cat, drop_first=True).astype(float)
+
+# Découper une variable continue pour inspecter un motif
+df.groupby(pd.qcut(pred, 10))["residu"].mean()   # déciles
+df.groupby(pd.cut(df["x"], [0, 75, 150, 1000]))  # bornes choisies
 ```
 
 **Pièges Pandas**
@@ -157,6 +178,15 @@ df.drop_duplicates(subset=[...])
 - `size()` compte les **lignes**, les agrégations numériques ne comptent que les
   valeurs **présentes** : comparer les deux révèle où sont les trous.
 - Une moyenne sur 1 élément s'affiche comme les autres. D'où le `count`, toujours.
+- `pd.get_dummies` : les lignes dont la colonne catégorielle vaut `nan` reçoivent des
+  zéros partout — donc exactement le codage de la modalité de référence. Aucun
+  avertissement, coefficient de référence biaisé.
+  → `dummy_na=True`, ou filtrer les `nan` avant.
+- `drop_duplicates` garde la **première** ligne rencontrée, pas la plus pertinente.
+  Trier d'abord si le choix compte : `sort_values(...).drop_duplicates(...)`.
+- Tout filtre en amont définit un **périmètre**, qui doit être annoncé.
+  `df[df["energ"] == "ES"]` exclut aussi les hybrides, qui ont leur propre code.
+  → `value_counts()` sur la colonne **avant** de filtrer, pour voir ce qu'on écarte.
 
 ---
 
@@ -192,6 +222,9 @@ np.where(a > 5, a, 0)           # remplacer
 - `*` sur une **liste** Python répète la séquence ; sur un **array**, il multiplie.
   Même symbole, sens opposé.
 - Un tableau vide (`shape (0,)`) ne lève pas d'erreur au filtrage — il explose plus loin.
+- `np.full_like(a, valeur)` hérite du **dtype** de `a` : une moyenne placée dans un
+  tableau d'entiers est tronquée sans avertissement.
+  → `np.full(a.shape, valeur)` quand la valeur est flottante.
 
 ---
 
@@ -243,6 +276,32 @@ b_orig = b - w * mu / sigma
 - Diagnostic de base : tracer le coût en fonction des itérations. Il doit décroître.
 - Conserver `mu` et `sigma` — les paramètres appris portent sur la variable transformée.
 - Ne jamais extrapoler hors de la plage d'entraînement (d'où un `b` sans sens physique).
+
+**Régression multiple**
+
+```python
+# Évaluer hors échantillon dès que le nombre de paramètres varie
+Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=0)
+m = LinearRegression().fit(Xtr, ytr)
+r2_score(yte, m.predict(Xte))
+
+# Référence naïve : prédire la moyenne pour tout le monde
+mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
+```
+
+- Ajouter une variable ne peut **jamais** faire baisser le R² d'entraînement.
+  Dès que le nombre de paramètres varie d'un modèle à l'autre, il cesse d'être un
+  critère de comparaison → jeu de test, ou R² ajusté.
+- Toujours comparer à une **référence naïve**. Une MAE seule ne veut rien dire ;
+  un rapport à la référence, si.
+- `R²(A) + R²(B) ≠ R²(A, B)` dès que A et B sont corrélées : l'information est
+  partagée, pas additive. Le bon indicateur est le **gain incrémental**, pas le R²
+  de chaque variable prise seule.
+- Hiérarchie polynomiale : ne pas retenir un terme d'ordre supérieur sans son terme
+  d'ordre inférieur. Sans terme linéaire, la parabole a son sommet forcé en zéro.
+- Encoder une catégorie : le one-hot brut laisse chaque modalité libre ; décomposer
+  (`"A 8"` → type + nombre de rapports) impose linéarité **et** additivité. Moins de
+  colonnes, moins de gain — l'arbitrage se mesure, il ne se devine pas.
 
 ---
 
@@ -306,3 +365,28 @@ b_orig = b - w * mu / sigma
 - **Fuite de données** (*data leakage*) : une variable qui contient l'information de
   la cible d'une façon indisponible au moment de prédire. Symptôme : un R² anormalement
   élevé. Test : cette variable serait-elle connue *avant* la cible, en situation réelle ?
+- Une fuite **non linéaire** ne se voit pas dans une matrice de corrélation
+  (`puiss_admin` : 0,708 seulement, alors que la formule officielle la reproduit à
+  99,5 %). Chercher la relation, pas seulement le coefficient.
+- Deux autres tests de fuite qui fonctionnent : le rapport `cible / variable` est-il
+  quasi constant ? Le coefficient appris coïncide-t-il avec une constante physique
+  connue ?
+- **Une ligne n'est pas forcément une observation.** Vérifier l'unité du fichier avant
+  tout calcul : un modèle déclaré en 18 variantes pèse 18 fois plus lourd dans la somme
+  des carrés. Dédoublonner sur des clés métier explicites.
+- Un coefficient au signe **physiquement absurde** n'est pas forcément de la
+  colinéarité. Vérifier dans l'ordre : corrélation entre variables, R² de la variable
+  seule, gain incrémental. Un gain nul → le coefficient ajuste du bruit, il ne
+  s'interprète pas.
+- **Se méfier des résultats mécaniques.** Le résidu moyen par modalité d'une variable
+  présente dans le modèle est nul par construction (moindres carrés) ; une colonne
+  constante donne le même zéro. Aucun des deux ne démontre quoi que ce soit.
+- Un R² de test **supérieur** au R² d'entraînement signale un tirage favorable, pas un
+  bon modèle. Le classement des modèles reste valide s'ils partagent le découpage ;
+  les valeurs absolues, non. → validation croisée.
+- Détecter une courbure résiduelle sans se fier à l'œil :
+  `df.groupby(pd.qcut(pred, 10))["residu"].mean()`. Un motif en U = non-linéarité
+  restante ; des moyennes qui oscillent autour de zéro = rien à voir.
+- Un modèle ne peut pas être meilleur que ses variables. Quand deux objets que tout
+  sépare en réalité sont identiques dans le tableau, l'erreur est irréductible :
+  c'est une limite de données, pas d'algorithme.

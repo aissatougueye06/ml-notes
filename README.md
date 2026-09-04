@@ -8,17 +8,19 @@ par nature et s'enrichit au fur et à mesure.
 
 ## Contenu
 
-- **[`MEMO.md`](MEMO.md)** — le carnet de terrain. Messages d'erreur indexés par
-  leur texte exact, gestes Pandas et NumPy, rituel de mise en place d'un projet.
+- **[`MEMO.md`](MEMO.md)** — le carnet de terrain. Erreurs indexées par leur message
+  exact (§1), rituel de projet (§2), gestes Pandas et NumPy (§3-4), socle ML (§5),
+  hygiène de notebook (§6), complexité (§7), méthode d'analyse (§8).
   Fait pour être cherché (`Ctrl+F`), pas lu d'un bout à l'autre.
-- **`memo-machine-learning.pdf`** — les principes, en 15 slides. Le « pourquoi »
+- **`memo-machine-learning.pdf`** — les principes, en slides. Le « pourquoi »
   plutôt que le « quoi taper ». À relire d'un bloc.
   ([source `.pptx`](memo-machine-learning.pptx) pour l'édition)
 
 ## Règle d'alimentation
 
 Dès qu'un problème me coûte plus de dix minutes, il gagne trois lignes dans
-`MEMO.md`, au moment où il arrive.
+`MEMO.md`, au moment où il arrive. Même chose pour une décision tranchée dans un
+projet : sans ça, le carnet diverge du code.
 
 ## Projets associés
 
