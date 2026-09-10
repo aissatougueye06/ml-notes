@@ -374,6 +374,10 @@ mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
 - **Une ligne n'est pas forcément une observation.** Vérifier l'unité du fichier avant
   tout calcul : un modèle déclaré en 18 variantes pèse 18 fois plus lourd dans la somme
   des carrés. Dédoublonner sur des clés métier explicites.
+  - **Dédoublonner AVANT de découper.** Si le même objet figure en plusieurs lignes,
+  un `train_test_split` en place des copies des deux côtés : le modèle est évalué
+  sur des observations qu'il a déjà vues. C'est une fuite, et elle gonfle le score
+  de test sans rien signaler.
 - Un coefficient au signe **physiquement absurde** n'est pas forcément de la
   colinéarité. Vérifier dans l'ordre : corrélation entre variables, R² de la variable
   seule, gain incrémental. Un gain nul → le coefficient ajuste du bruit, il ne
