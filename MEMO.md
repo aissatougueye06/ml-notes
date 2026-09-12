@@ -18,7 +18,8 @@ diverge du code.
 [5. Machine learning](#5-machine-learning--le-socle) ·
 [6. Hygiène de notebook](#6-hygiène-de-notebook) ·
 [7. Algorithmique](#7-algorithmique--repères) ·
-[8. Méthode d'analyse](#8-méthode-danalyse)
+[8. Méthode d'analyse](#8-méthode-danalyse) ·
+[9. Du notebook au module](#9-du-notebook-au-module)
 
 ---
 
@@ -82,6 +83,10 @@ Alignement à droite : 4 vs 3, incompatible.
 Taux d'apprentissage trop grand : le coût augmente au lieu de diminuer.
 → Diviser α, ou normaliser `x` (ce qui élargit beaucoup la plage d'α utilisable).
 → Un `nan` contamine toutes les itérations suivantes : inutile de laisser tourner.
+→ Si la divergence est **attendue** (démonstration d'un α trop grand), la déclarer
+plutôt que de la subir : `with np.errstate(over="ignore", invalid="ignore"):`. La trace
+numpy fait apparaître un chemin local et un PID d'ipykernel qui change à chaque
+redémarrage — le notebook ressort modifié dans `git status` sans raison.
 
 ### `nan` inattendu dans un résultat, sans erreur
 Souvent une variable réutilisée d'une cellule précédente (état fantôme de notebook).
@@ -90,11 +95,25 @@ Souvent une variable réutilisée d'une cellule précédente (état fantôme de 
 ### `cannot reshape array of size 12 into shape (5,3)`
 `reshape` ne crée ni ne détruit de données : lignes × colonnes doit égaler le total.
 
+### `Multiple top-level modules discovered in a flat-layout`
+Des `.py` traînent à la racine du projet : setuptools ne sait pas lequel est le paquet.
+Arrive typiquement après un téléchargement fichier par fichier, qui aplatit l'arborescence.
+→ Ranger le code dans un dossier de paquet avec `__init__.py`, les tests dans `tests/`.
+→ Et déclarer explicitement dans `pyproject.toml` : `[tool.setuptools]` / `packages = ["co2"]`.
+
+### `editable mode currently requires a setuptools-based build`
+pip trop ancien (< 21.3) pour installer en mode éditable depuis un `pyproject.toml` seul.
+→ Vérifier d'abord qu'on est dans le bon `.venv` (`which python`) : c'est souvent un
+environnement parallèle créé automatiquement par VS Code quand une installation échoue.
+→ Sinon `pip install --upgrade pip`.
+
 ---
 
 ## 2. Mise en place d'un projet
 
-Rituel complet, du dossier vide au dépôt en ligne.
+### 2.1 — Rituel de démarrage
+
+Du dossier vide au dépôt en ligne.
 
 ```bash
 mkdir -p ~/Projets/<projet>/data && cd ~/Projets/<projet>
@@ -110,24 +129,103 @@ cat > .gitignore << 'EOF'
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 .ipynb_checkpoints/
 .DS_Store
+*.egg-info/
 EOF
 git add .
 git commit -m "Initialisation du projet"
 gh repo create <projet> --public --source=. --push
 ```
 
-Ensuite, à chaque étape terminée :
-
-```bash
-git add . && git commit -m "<ce que ce commit apporte>" && git push
-```
-
 - `git init` et `gh repo create` : **une seule fois** par projet.
-- `git status` : voir ce qui a changé et n'est pas encore sauvegardé.
 - `requirements.txt` : écrire les dépendances **directes** à la main.
   `pip freeze` capture tout l'environnement (100+ lignes) — réservé à la reproduction exacte.
+
+### 2.2 — Structure d'un projet Python
+
+```
+co2-api/
+├── co2/                 le paquet — ce que j'écris
+│   ├── __init__.py      déclare co2/ comme paquet importable
+│   └── preparation.py
+├── tests/               le code qui vérifie le code
+│   └── test_preparation.py
+├── pyproject.toml       identité, dépendances, config des outils
+├── README.md
+└── .gitignore
+```
+
+- **Ce qui va dans Git** : ces six fichiers, rien d'autre.
+- **Ce que les outils fabriquent**, et qui reste ignoré : `.venv/` (l'environnement,
+  des centaines de Mo, dépendant de la machine), `__pycache__/` (bytecode),
+  `.pytest_cache/` (dernier lancement, permet `pytest --lf`), `*.egg-info/` (carte
+  d'identité écrite par `pip install -e` ; `top_level.txt` y contient le nom du paquet).
+- **La vérification qui tranche** : `git ls-files` liste ce que Git suit réellement,
+  par opposition à ce qu'affiche l'éditeur.
+- Séparer `co2/` et `tests/` n'est pas cosmétique : à l'installation, seul le paquet part.
+- Variante fréquente : `src/co2/` au lieu de `co2/`, pour forcer le travail sur la
+  version installée plutôt que sur les fichiers du dossier courant.
+
+### 2.3 — `pyproject.toml`
+
+Le fichier d'identité du projet. Il a remplacé `setup.py`, `setup.cfg`, `pytest.ini`,
+`.flake8`… Quatre rôles :
+
+```toml
+[project]                        # 1. qui je suis
+name = "co2"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["pandas", "numpy", "scikit-learn"]
+
+[project.optional-dependencies]  # 2. ce qu'il faut pour développer
+dev = ["pytest", "ruff"]
+
+[build-system]                   # 3. quel outil sait me construire
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]                #    ne pas laisser deviner le paquet
+packages = ["co2"]
+
+[tool.pytest.ini_options]        # 4. la config des autres outils
+testpaths = ["tests"]
+[tool.ruff]
+line-length = 100
+```
+
+Le 4e bloc explique la popularité du format : chaque outil vient lire sa section
+`[tool.xxx]`. Une seule configuration pour tout le projet.
+
+```bash
+pip install -e ".[dev]"
+```
+
+`.` = dossier courant · `[dev]` = dépendances optionnelles · `-e` = mode **éditable**,
+Python pointe vers mes fichiers au lieu d'en copier une version figée. C'est ce qui fait
+marcher `from co2.preparation import preparer` sans bricoler `sys.path`.
+
+### 2.4 — Messages de commit
+
+Impératif présent : le message complète « ce commit… ». Sujet sous 50 caractères
+(72 max), sans point final, majuscule à l'initiale. Le détail va dans le corps.
+
+```bash
+git commit -m "Extrait la preparation des donnees en module teste" -m "Corps : ce que le commit apporte, en phrases. C'est ce qu'on relira dans six mois."
+```
+
+- Le message se déduit du **diff**, jamais de ce qu'on croit avoir modifié :
+  `git status` puis `git add`, puis `git diff --staged` pour voir le futur commit.
+- `git diff --staged` vide = rien n'est indexé, pas « rien n'a changé ».
+- Si le message ne vient pas, c'est souvent que le commit mélange deux choses.
+- « Mise à jour » ne dit rien. Dire **laquelle**.
+- Éviter les indices (`CO₂`) et les accents : mauvais rendu dans certains terminaux.
+- Une convention par dépôt, et s'y tenir.
+- Le `git diff` d'un notebook est illisible (JSON + base64). `git status` pour savoir
+  quels fichiers ont bougé, la mémoire de la session pour savoir quoi.
 
 ---
 
@@ -394,3 +492,59 @@ mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
 - Un modèle ne peut pas être meilleur que ses variables. Quand deux objets que tout
   sépare en réalité sont identiques dans le tableau, l'erreur est irréductible :
   c'est une limite de données, pas d'algorithme.
+
+---
+
+## 9. Du notebook au module
+
+Le passage du `.ipynb` au `.py` n'est pas un copier-coller. Trois habitudes de notebook
+deviennent des défauts dans un module.
+
+| Dans un notebook | Dans un module | Pourquoi |
+|---|---|---|
+| la fonction lit `df` global | `df` passe en argument | sinon intestable, et casse au premier import |
+| `print(...)` | `return ...` | un print est invisible depuis un test |
+| on modifie le DataFrame en place | `.copy()` d'abord | un effet de bord en production est un bug qui ne se reproduit pas |
+
+**Tester**
+
+```python
+# tests/test_preparation.py
+import pytest
+from co2.preparation import preparer
+
+@pytest.fixture
+def brut():
+    """Jeu synthétique : quelques lignes choisies pour être lisibles."""
+    return pd.DataFrame({...})
+
+def test_deduplique_les_variantes(brut):
+    assert len(preparer(brut, "ES")) == 3
+```
+
+- Tester sur des **données inventées**, pas sur le vrai fichier : quelques millisecondes,
+  des cas choisis, et aucune dépendance à un CSV.
+- Une `@pytest.fixture` est un jeu de données préparé une fois et réinjecté dans chaque
+  test qui le demande en argument.
+- `pytest.approx(0.25)` pour comparer des flottants.
+- `with pytest.raises(ValueError, match="..."):` pour vérifier qu'un cas invalide échoue
+  **explicitement** plutôt que de renvoyer du vide.
+- Vérifier aussi l'absence d'effet de bord : `pd.testing.assert_frame_equal(entree, copie)`.
+
+```bash
+pytest              # tout
+pytest -q           # sortie courte
+pytest --lf         # seulement les tests qui ont échoué la dernière fois
+pytest -k dedup     # ceux dont le nom contient "dedup"
+```
+
+**À retenir**
+
+- Un test qui échoue peut désigner une **ambiguïté dans la fonction**, pas une erreur
+  dans le test. Lire l'écart avant de corriger le chiffre attendu.
+- Écrire le test **d'abord**, le voir échouer, puis corriger la fonction. C'est l'ordre
+  qui garantit que le test teste vraiment quelque chose.
+- Une fonction qui fait deux choses (filtrer *et* dédoublonner) donne un test ambigu.
+  Le test force à séparer — c'est son second bénéfice, après la vérification.
+- Faire échouer un test volontairement de temps en temps : savoir lire une sortie pytest
+  est une compétence à part entière.
