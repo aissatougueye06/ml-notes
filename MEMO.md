@@ -113,7 +113,10 @@ environnement parallèle créé automatiquement par VS Code quand une installati
 
 ### 2.1 — Rituel de démarrage
 
-Du dossier vide au dépôt en ligne.
+Deux cas, selon que le projet est une **analyse** (des notebooks) ou un **paquet**
+(du code destiné à être importé, testé, déployé).
+
+**Projet d'analyse** — les dépendances se listent dans la commande.
 
 ```bash
 mkdir -p ~/Projets/<projet>/data && cd ~/Projets/<projet>
@@ -122,6 +125,22 @@ source .venv/bin/activate          # à refaire à CHAQUE nouveau terminal
 pip install pandas numpy matplotlib scikit-learn jupyter ipykernel
 code .                             # ouvrir LE PROJET, pas le dossier parent
 ```
+
+**Projet à paquet** — l'arborescence et le `pyproject.toml` viennent d'abord ; un seul
+`pip install` lit les dépendances déclarées dedans (voir 2.2 et 2.3).
+
+```bash
+mkdir -p ~/Projets/<projet>/<paquet> ~/Projets/<projet>/tests
+cd ~/Projets/<projet>
+python3 -m venv .venv && source .venv/bin/activate
+touch <paquet>/__init__.py
+# écrire pyproject.toml, puis :
+pip install -e ".[dev]"            # installe le paquet + pandas, pytest, ruff…
+pytest                             # doit déjà tourner (0 test collecté)
+code .
+```
+
+Puis, dans les deux cas :
 
 ```bash
 git init
@@ -141,10 +160,43 @@ gh repo create <projet> --public --source=. --push
 ```
 
 - `git init` et `gh repo create` : **une seule fois** par projet.
-- `requirements.txt` : écrire les dépendances **directes** à la main.
-  `pip freeze` capture tout l'environnement (100+ lignes) — réservé à la reproduction exacte.
+- Projet d'analyse : `requirements.txt` écrit à la main, dépendances **directes**
+  seulement. `pip freeze` capture tout l'environnement (100+ lignes) — réservé à la
+  reproduction exacte.
+- Projet à paquet : les dépendances vivent dans `pyproject.toml`, pas ailleurs.
 
 ### 2.2 — Structure d'un projet Python
+
+**Le vocabulaire, qui explique la forme.**
+
+- Un **module** est un fichier `.py`. Il contient ce qu'on veut : fonctions, constantes,
+  classes. `preparation.py` est un module.
+- Un **paquet** est un dossier contenant des modules et un `__init__.py`. Un seul module
+  suffit : c'est la structure qui fait le paquet, pas le nombre.
+- L'arborescence du disque **est** la syntaxe d'import. Le point sépare les niveaux comme
+  un slash sépare les dossiers :
+
+```python
+from co2.preparation import preparer
+#    ^^^  ^^^^^^^^^^^     ^^^^^^^^
+#  paquet   module         objet
+```
+
+C'est vrai partout : `sklearn` est un paquet, `sklearn.linear_model` un module dedans,
+`LinearRegression` une classe dans ce module. `math` est un simple module.
+
+`__init__.py` est exécuté à l'import du paquet. Vide, il signale seulement « ceci est un
+paquet ». On peut y écrire `from co2.preparation import preparer` pour offrir une façade
+courte (`from co2 import preparer`) — inutile tant qu'il n'y a qu'un module.
+
+Un module sait s'il est importé ou lancé :
+
+```python
+if __name__ == "__main__":      # s'exécute avec `python co2/preparation.py`
+    ...                         # mais pas à l'import
+```
+
+**L'arborescence.**
 
 ```
 co2-api/
