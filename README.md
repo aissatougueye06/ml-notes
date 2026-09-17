@@ -15,9 +15,9 @@ par nature et s'enrichit au fur et à mesure.
   méthode d'analyse (§8), passage du notebook au module et tests `pytest` (§9).
   Fait pour être cherché (`Ctrl+F`), pas lu d'un bout à l'autre — le sommaire en tête
   de fichier renvoie vers chaque section.
-- **`memo-machine-learning.pdf`** — les principes, en slides. Le « pourquoi »
+- **[`memo-machine-learning.pdf`](memo-machine-learning.pdf)** — les principes, en slides. Le « pourquoi »
   plutôt que le « quoi taper ». À relire d'un bloc.
-  ([source `.pptx`](memo-machine-learning.pptx) pour l'édition)
+  ([source `memo-machine-learning.pptx`](memo-machine-learning.pptx) pour l'édition)
 
 ## Règle d'alimentation
 

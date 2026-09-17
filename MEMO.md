@@ -5,7 +5,7 @@ Carnet personnel, alimenté au fil des projets et du cours
 
 **Ce qui va ici** : les lignes que je retape sans arrêt, et les messages d'erreur avec
 leur cause. **Ce qui ne va pas ici** : les principes et le « pourquoi » — ils sont dans
-`memo-machine-learning.pptx`, à relire d'un bloc.
+[`memo-machine-learning.pdf`](`memo-machine-learning.pdf`), à relire d'un bloc.
 
 **Règle d'alimentation** : dès qu'un problème m'a coûté plus de dix minutes, il gagne
 trois lignes ici, au moment où il arrive. Même chose pour une **décision** tranchée
