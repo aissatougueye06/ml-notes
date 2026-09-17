@@ -17,7 +17,7 @@ par nature et s'enrichit au fur et à mesure.
   de fichier renvoie vers chaque section.
 - **[`memo-machine-learning.pdf`](memo-machine-learning.pdf)** — les principes, en slides. Le « pourquoi »
   plutôt que le « quoi taper ». À relire d'un bloc.
-  ([source `memo-machine-learning.pptx`](memo-machine-learning.pptx) pour l'édition)
+  ([source `.pptx`](memo-machine-learning.pptx) pour l'édition)
 
 ## Règle d'alimentation
 
