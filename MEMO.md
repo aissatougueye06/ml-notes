@@ -95,6 +95,17 @@ Souvent une variable réutilisée d'une cellule précédente (état fantôme de 
 ### `cannot reshape array of size 12 into shape (5,3)`
 `reshape` ne crée ni ne détruit de données : lignes × colonnes doit égaler le total.
 
+### `ModuleNotFoundError: No module named '<mon_paquet>'` en lançant un script
+`pytest` trouve le paquet (il ajoute la racine du projet au chemin de recherche),
+`python scripts/x.py` non.
+→ `pip install -e .` — c'est exactement ce qu'il répare.
+
+### `UnboundLocalError: cannot access local variable 'X'`
+Une variable locale porte le même nom qu'une fonction importée : `predire = predire(...)`.
+Dès qu'on assigne à un nom dans une fonction, Python le traite comme local **sur toute la
+fonction**, y compris avant l'assignation.
+→ Nommer le résultat autrement (`valeur = predire(...)`).
+
 ### `Multiple top-level modules discovered in a flat-layout`
 Des `.py` traînent à la racine du projet : setuptools ne sait pas lequel est le paquet.
 Arrive typiquement après un téléchargement fichier par fichier, qui aplatit l'arborescence.
@@ -218,6 +229,11 @@ co2-api/
 - **La vérification qui tranche** : `git ls-files` liste ce que Git suit réellement,
   par opposition à ce qu'affiche l'éditeur.
 - Séparer `co2/` et `tests/` n'est pas cosmétique : à l'installation, seul le paquet part.
+- `co2/` contient ce qui est **importé** : des définitions, sans effet de bord. `scripts/`
+  contient ce qui est **exécuté** : arguments de ligne de commande, écriture de fichiers,
+  affichage. Test : `import co2.modele` ne doit *rien faire*.
+- `data/` et `models/` sont des intrants et des artefacts : hors Git dans un projet de
+  service. Dans un projet d'analyse, versionner les données se défend (reproductibilité).
 - Variante fréquente : `src/co2/` au lieu de `co2/`, pour forcer le travail sur la
   version installée plutôt que sur les fichiers du dossier courant.
 
@@ -549,6 +565,8 @@ mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
 
 ## 9. Du notebook au module
 
+### 9.1 — Ce qui change
+
 Le passage du `.ipynb` au `.py` n'est pas un copier-coller. Trois habitudes de notebook
 deviennent des défauts dans un module.
 
@@ -558,7 +576,7 @@ deviennent des défauts dans un module.
 | `print(...)` | `return ...` | un print est invisible depuis un test |
 | on modifie le DataFrame en place | `.copy()` d'abord | un effet de bord en production est un bug qui ne se reproduit pas |
 
-**Tester**
+### 9.2 — Tester avec pytest
 
 ```python
 # tests/test_preparation.py
@@ -600,3 +618,86 @@ pytest -k dedup     # ceux dont le nom contient "dedup"
   Le test force à séparer — c'est son second bénéfice, après la vérification.
 - Faire échouer un test volontairement de temps en temps : savoir lire une sortie pytest
   est une compétence à part entière.
+
+**Lire une sortie pytest**
+
+```
+tests/test_modele.py .......                        [ 50%]
+tests/test_preparation.py ..F....                   [100%]
+```
+
+- Un caractère par test : `.` réussi · `F` échec d'assertion · `E` erreur (souvent dans
+  la fixture) · `s` sauté. La position du `F` désigne lequel.
+- Le pourcentage est une **progression**, pas un score : part des tests collectés déjà
+  exécutés. Utile quand un test bloque — il dit où l'exécution s'est arrêtée.
+- `>` marque la ligne qui a échoué, les `E` l'expliquent. Pytest réécrit les assertions
+  pour afficher les valeurs réelles (`assert 3 == 2`) — un `assert` Python nu ne dirait rien.
+- `configfile:` et `testpaths:` en tête : à vérifier en premier si un test n'est pas collecté.
+- Les fichiers sont collectés dans l'**ordre alphabétique**, pas celui de leur écriture.
+- Le second argument d'une assertion est un message qui dit ce que le test croyait
+  vérifier : `assert len(x) == 2, "les deux finitions doivent survivre"`. Sur les
+  assertions non évidentes seulement — ailleurs, le nom du test suffit.
+
+**Outils pytest à connaître**
+
+- `tmp_path` : dossier temporaire fourni par pytest, nettoyé après le test. Pour tout ce
+  qui écrit sur disque, au lieu de polluer le projet.
+- `with pytest.warns(UserWarning, match="..."):` : transforme un avertissement attendu en
+  garantie vérifiée, au lieu de le laisser traîner en bas de la sortie.
+
+---
+
+### 9.3 — Du modèle à l'artefact
+
+**Le cycle, valable partout** : construire → entraîner → **évaluer** → sauvegarder →
+charger → prédire. Ne jamais sauter l'évaluation : faire retourner à `entrainer()` le
+modèle *et* ses métriques empêche un modèle non mesuré de circuler.
+
+**Tout mettre dans un `Pipeline`.** Le problème : au moment de prédire, les données
+doivent subir exactement les mêmes transformations qu'à l'entraînement. Un `drop_first`
+oublié ou des colonnes dans un autre ordre produisent des prédictions fausses *sans lever
+d'erreur*. Ça porte un nom : **train/serve skew**.
+
+```python
+preparation = ColumnTransformer([
+    ("masse",     "passthrough",                           ["masse_ordma_min"]),
+    ("puissance", PolynomialFeatures(2, include_bias=False), ["puiss_max"]),
+    ("boite",     OneHotEncoder(handle_unknown="ignore",
+                                drop="first", sparse_output=False), ["typ_boite_nb_rapp"]),
+])
+modele = Pipeline([("preparation", preparation), ("regression", LinearRegression())])
+```
+
+Le fichier sérialisé contient alors les transformations **et** les coefficients : il
+devient impossible de prédire avec un encodage différent.
+
+- `PolynomialFeatures(2)` sur une colonne = la colonne et son carré. C'est le
+  `d["x²"] = d["x"]**2` du notebook, sous une forme que le pipeline sait rejouer.
+- `OneHotEncoder` = `pd.get_dummies`, `drop="first"` = `drop_first=True`.
+- `ColumnTransformer` applique chaque traitement à la bonne colonne ; `Pipeline` enchaîne
+  préparation puis modèle. Un seul `.fit()`, un seul `.predict()`.
+- `handle_unknown="ignore"` : une modalité jamais vue devient des zéros au lieu de lever
+  une exception. Indispensable pour une API — arbitrage explicite, à documenter.
+- Inspecter ce que ça produit : `modele.named_steps["preparation"].get_feature_names_out()`
+
+**Sérialiser.** `joblib.dump` / `joblib.load` — même principe que `pickle`, optimisé pour
+les gros tableaux NumPy. L'extension `.joblib` est une convention. Le `.joblib` est un
+**artefact** : régénérable, donc hors Git (`models/` dans `.gitignore`).
+
+**Entraîner dans un script, jamais dans l'API.** Un service qui entraîne au démarrage rend
+chaque redéploiement imprévisible. Le script (`scripts/entrainer.py` + `argparse`) est la
+**trace de comment l'artefact a été produit** : quelle motorisation, quel fichier, quel
+`random_state`. Un `.joblib` sorti d'un REPL est un artefact sans provenance.
+
+**Valider à la frontière.** Un modèle linéaire n'a pas de notion de plausibilité : masse
+négative → CO₂ négatif, sans avertissement. La validation se fait **là où les données
+entrent dans le système** (l'API), pas dans la fonction de prédiction, qui est une
+bibliothèque et peut légitimement extrapoler.
+
+**À retenir**
+
+- Un test dit ce qui **doit** se passer, pas ce qui se passe. Écrire un test qui constate
+  un comportement qu'on juge mauvais le transforme en contrat.
+- Le REPL sert à **découvrir** un comportement, le test à le **verrouiller** une fois décidé.
+- Le test qui protège vraiment : sauvegarder, recharger, vérifier que les prédictions sont
+  identiques (`np.testing.assert_allclose`).
