@@ -15,6 +15,9 @@ par nature et s'enrichit au fur et à mesure.
   méthode d'analyse (§8), passage du notebook au module et tests `pytest` (§9).
   Fait pour être cherché (`Ctrl+F`), pas lu d'un bout à l'autre — le sommaire en tête
   de fichier renvoie vers chaque section.
+- **[`GLOSSAIRE.md`](GLOSSAIRE.md)** — les termes rencontrés, définis en trois lignes.
+  Répond à « ça veut dire quoi, déjà ? ». Le « comment faire » est dans `MEMO.md`,
+  le « pourquoi » dans les slides.
 - **[`memo-machine-learning.pdf`](memo-machine-learning.pdf)** — les principes, en slides. Le « pourquoi »
   plutôt que le « quoi taper ». À relire d'un bloc.
   ([source `.pptx`](memo-machine-learning.pptx) pour l'édition)
