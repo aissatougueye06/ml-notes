@@ -72,8 +72,9 @@ Espaces de fin invisibles à l'affichage (export à format fixe). `"GO "` ≠ `"
 
 ### `operands could not be broadcast together with shapes (3,4) (3,)`
 Alignement à droite : 4 vs 3, incompatible.
-→ `(3,)` s'applique aux **colonnes**, `(3,1)` aux **lignes**.
-→ `.reshape(3, 1)`, ou `agg(..., keepdims=True)` si ça vient d'une agrégation.
+→ `(3,)` s'aligne sur le **dernier** axe (les colonnes) : il faut `(3,1)` pour agir
+sur les lignes. Attention au raccourci « `(3,)` est une colonne » — c'est l'inverse.
+→ `.reshape(3, 1)`, `v[:, None]`, ou `agg(..., keepdims=True)` si ça vient d'une agrégation.
 
 ### `Cannot perform reduction 'mean' with string dtype`
 `df.mean()` sur un DataFrame contenant des colonnes texte.
@@ -367,6 +368,10 @@ M[1]             # une ligne
 M[:, 1]          # une colonne (le ':' est obligatoire)
 M[-1]            # dernière ligne
 
+v = np.array([1, 2, 3])  # (3,) — ndim 1 : ni ligne ni colonne
+v[None, :]       # (1, 3)  ligne explicite
+v[:, None]       # (3, 1)  colonne explicite
+
 A * B            # terme à terme
 A @ B            # produit matriciel  ← ne PAS confondre
 A.T              # transposée
@@ -385,6 +390,13 @@ np.where(a > 5, a, 0)           # remplacer
 - `axis` = **l'axe qui disparaît**. Une agrégation réduit d'une dimension.
 - Broadcasting : formes alignées **à partir de la droite**, compatibles si égales
   ou si l'une vaut 1.
+- `(3,)` n'a **pas d'orientation** : `ndim == 1`, ni ligne ni colonne. Ligne et colonne
+  n'existent qu'en 2D — `(1,3)` est une ligne, `(3,1)` une colonne. L'affichage
+  horizontal de NumPy (`array([1, 2, 3])`) est trompeur sur ce point.
+  → `v[None, :]` et `v[:, None]` quand l'orientation doit être explicite.
+- Seul `@` donne une orientation à un 1D, celle qui rend le produit valide :
+  `A @ v` le traite en colonne, `v @ A` en ligne. Le broadcasting, lui, l'aligne
+  toujours à droite — donc comme une ligne.
 - `*` sur une **liste** Python répète la séquence ; sur un **array**, il multiplie.
   Même symbole, sens opposé.
 - Un tableau vide (`shape (0,)`) ne lève pas d'erreur au filtrage — il explose plus loin.
