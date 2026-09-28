@@ -113,6 +113,10 @@ Arrive typiquement après un téléchargement fichier par fichier, qui aplatit l
 → Ranger le code dans un dossier de paquet avec `__init__.py`, les tests dans `tests/`.
 → Et déclarer explicitement dans `pyproject.toml` : `[tool.setuptools]` / `packages = ["co2"]`.
 
+### `zsh: no matches found: .[dev]`
+zsh interprète les crochets comme un motif de fichiers. Ne se produit pas sous bash.
+→ Toujours entre guillemets : `pip install -e ".[dev]"`.
+
 ### `editable mode currently requires a setuptools-based build`
 pip trop ancien (< 21.3) pour installer en mode éditable depuis un `pyproject.toml` seul.
 → Vérifier d'abord qu'on est dans le bon `.venv` (`which python`) : c'est souvent un
@@ -165,6 +169,8 @@ __pycache__/
 .ipynb_checkpoints/
 .DS_Store
 *.egg-info/
+data/                              # intrants — à réévaluer sur un projet d'analyse
+models/                            # artefacts régénérables (§9.3)
 EOF
 git add .
 git commit -m "Initialisation du projet"
@@ -176,6 +182,14 @@ gh repo create <projet> --public --source=. --push
   seulement. `pip freeze` capture tout l'environnement (100+ lignes) — réservé à la
   reproduction exacte.
 - Projet à paquet : les dépendances vivent dans `pyproject.toml`, pas ailleurs.
+- `.gitignore` ne s'applique qu'aux fichiers **non encore suivis**. Ajouter `models/`
+  après un premier commit ne le retire pas du dépôt.
+  → `git rm -r --cached models/` puis commit. Le dossier reste sur le disque.
+- `python3 -m <module>` exécute un module installé comme un script, sans connaître son
+  chemin. Surtout : il garantit **quel interpréteur** l'exécute. `python -m pip install X`
+  installe dans le Python appelé ; `pip install X` seul suit le `PATH` et peut viser
+  ailleurs. Même réflexe que `which python` dès qu'une installation atterrit au mauvais
+  endroit.
 
 ### 2.2 — Structure d'un projet Python
 
@@ -212,24 +226,36 @@ if __name__ == "__main__":      # s'exécute avec `python co2/preparation.py`
 
 ```
 co2-api/
-├── co2/                 le paquet — ce que j'écris
+├── co2/                 le paquet — ce que j'écris, et la seule chose distribuée
 │   ├── __init__.py      déclare co2/ comme paquet importable
-│   └── preparation.py
+│   ├── preparation.py
+│   └── modele.py
+├── scripts/             ce qui s'exécute, jamais importé
+│   └── entrainer.py
 ├── tests/               le code qui vérifie le code
-│   └── test_preparation.py
+│   ├── test_preparation.py
+│   └── test_modele.py
+├── data/                intrants
+│   └── vehicules.csv
+├── models/              artefacts régénérables
+│   └── co2.joblib
 ├── pyproject.toml       identité, dépendances, config des outils
 ├── README.md
 └── .gitignore
 ```
 
-- **Ce qui va dans Git** : ces six fichiers, rien d'autre.
+- **Ce qui va dans Git** : `co2/`, `scripts/`, `tests/` et les trois fichiers racine.
+  Le contenu de `data/` et `models/` se décide à part (voir plus bas).
 - **Ce que les outils fabriquent**, et qui reste ignoré : `.venv/` (l'environnement,
   des centaines de Mo, dépendant de la machine), `__pycache__/` (bytecode),
   `.pytest_cache/` (dernier lancement, permet `pytest --lf`), `*.egg-info/` (carte
   d'identité écrite par `pip install -e` ; `top_level.txt` y contient le nom du paquet).
 - **La vérification qui tranche** : `git ls-files` liste ce que Git suit réellement,
-  par opposition à ce qu'affiche l'éditeur.
+  par opposition à ce qu'affiche l'éditeur. C'est la seule commande qui donne la même
+  réponse que la vue GitHub — `git status` ne montre que ce qui a bougé.
 - Séparer `co2/` et `tests/` n'est pas cosmétique : à l'installation, seul le paquet part.
+  `tests/` n'a **pas** d'`__init__.py` : pytest le trouve par `testpaths` et importe `co2`
+  via l'installation éditable. En faire un paquet brouillerait la frontière pour rien.
 - `co2/` contient ce qui est **importé** : des définitions, sans effet de bord. `scripts/`
   contient ce qui est **exécuté** : arguments de ligne de commande, écriture de fichiers,
   affichage. Test : `import co2.modele` ne doit *rien faire*.
@@ -240,8 +266,7 @@ co2-api/
 
 ### 2.3 — `pyproject.toml`
 
-Le fichier d'identité du projet. Il a remplacé `setup.py`, `setup.cfg`, `pytest.ini`,
-`.flake8`… Quatre rôles :
+Le fichier de configuration central du projet : nom du paquet, version, dépendances, et les dépendances optionnelles groupées sous [project.optional-dependencies], dont le groupe dev. Quatre rôles :
 
 ```toml
 [project]                        # 1. qui je suis
@@ -257,17 +282,32 @@ dev = ["pytest", "ruff"]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]                #    ne pas laisser deviner le paquet
-packages = ["co2"]
+[tool.setuptools.packages.find]  #    ne pas laisser deviner le paquet
+include = ["co2*"]               #    l'étoile couvre les sous-paquets (co2.data…)
 
 [tool.pytest.ini_options]        # 4. la config des autres outils
 testpaths = ["tests"]
 [tool.ruff]
-line-length = 100
+line-length = 88                 #    convention Black (79 pour la PEP 8 stricte)
 ```
 
 Le 4e bloc explique la popularité du format : chaque outil vient lire sa section
-`[tool.xxx]`. Une seule configuration pour tout le projet.
+`[tool.xxx]`. Une seule configuration pour tout le projet. Ces sections sont **sans
+rapport avec les dépendances** : `[project.optional-dependencies]` dit à pip *quoi
+installer*, `[tool.ruff]` dit à ruff *comment se comporter*. pip ignore les `[tool.*]`.
+
+**Ce que fait `[build-system]`.** pip ne sait pas construire un paquet. Il lit cette
+section *en premier*, installe setuptools dans un environnement **temporaire et isolé**,
+appelle le backend, installe le résultat dans le `.venv`, puis jette l'environnement de
+construction. D'où :
+
+- `requires` = ce qu'il faut pour construire, pas une dépendance du projet — setuptools
+  n'atterrit pas dans mon `.venv` ;
+- `build-backend` = le point d'entrée à appeler dedans. Une chaîne, pas une liste.
+
+C'est l'ordre qui explique le reste : `[project]` et `[tool.setuptools.*]` ne sont lus
+qu'à l'étape suivante, par le backend. Celui-ci est interchangeable (hatchling,
+poetry-core) — seule la section `[tool.<backend>]` serait à réécrire.
 
 ```bash
 pip install -e ".[dev]"
@@ -276,6 +316,18 @@ pip install -e ".[dev]"
 `.` = dossier courant · `[dev]` = dépendances optionnelles · `-e` = mode **éditable**,
 Python pointe vers mes fichiers au lieu d'en copier une version figée. C'est ce qui fait
 marcher `from co2.preparation import preparer` sans bricoler `sys.path`.
+
+- Les guillemets sont pour zsh, qui interprète les crochets comme un motif (§1).
+- **Le mode éditable ne suit pas les changements de configuration.** Un nouveau `.py` ou
+  un nouveau sous-paquet est pris en compte immédiatement ; une modification du
+  `pyproject.toml` (dépendance ajoutée, `include` changé) exige de relancer la commande.
+- Les dépendances optionnelles ne servent pas qu'au développement : ce sont des groupes
+  nommés. `viz = ["matplotlib"]` permettrait `pip install co2[viz]` côté utilisateur.
+- **Installer un paquet dépose parfois un exécutable** dans `.venv/bin/`. `pytest` en
+  ligne de commande n'installe rien : c'est l'outil posé par `[dev]` qui se lance.
+  → `which pytest` doit pointer vers le `.venv` du projet.
+- Côté utilisateur, rien de tout ça : `pip install co2` suffit, il reçoit une copie figée
+  sans les tests. Le `-e` et le `[dev]` ne concernent que le dépôt cloné.
 
 ### 2.4 — Messages de commit
 
