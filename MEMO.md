@@ -291,6 +291,38 @@ testpaths = ["tests"]
 line-length = 88                 #    convention Black (79 pour la PEP 8 stricte)
 ```
 
+**`name`** est le nom de **distribution** — celui qu'on tape dans `pip install`. Le nom
+du **paquet** est celui du dossier — celui qu'on tape dans `import`. Rien ne les oblige
+à coïncider : `pip install scikit-learn` → `import sklearn`. Les faire identiques reste
+la convention, sinon il faut se souvenir que l'un s'installe et l'autre s'importe.
+
+- `name` doit être unique **sur PyPI**, et seulement en cas de publication réelle.
+  `pip install -e .` ne consulte rien.
+- Les tirets sont permis dans `name` (`pred-co2`), jamais dans un nom importable — le
+  tiret est l'opérateur de soustraction.
+
+**`version`** n'est ni calculée ni vérifiée : je l'écris à la main. Le critère est
+extérieur — **est-ce que le code de quelqu'un qui m'utilise déjà va cesser de
+fonctionner ?**
+
+```
+0.1.0
+│ │ └── correctif : bug corrige, le code appelant ne change pas
+│ └──── mineure   : ajout, l'existant continue de marcher
+└────── majeure   : rupture — signature modifiee, fonction retiree
+```
+
+- L'ampleur du travail n'entre pas en jeu. Réécrire un module entier sans toucher aux
+  signatures = un correctif. Renommer un argument = une rupture.
+- Quand un nombre augmente, **tous ceux à sa droite repartent à zéro** :
+  `0.1.3 → 0.2.0`, jamais `0.2.3`.
+- Ce qui est privé (`_nettoyer`, réorganisation interne) n'engage rien. D'où l'intérêt
+  d'une façade explicite dans `__init__.py` : elle délimite le contrat.
+- `0.x` = **rien n'est stable**, les ruptures y sont admises sans incrémenter le premier
+  chiffre. Passer à `1.0.0` est l'engagement de ne plus casser sans le dire.
+- Rien à voir avec les versions grand public (iOS 27, Ubuntu 24.04) : celles-là suivent
+  le calendrier, pas la compatibilité.
+
 Le 4e bloc explique la popularité du format : chaque outil vient lire sa section
 `[tool.xxx]`. Une seule configuration pour tout le projet. Ces sections sont **sans
 rapport avec les dépendances** : `[project.optional-dependencies]` dit à pip *quoi
@@ -388,15 +420,37 @@ df.groupby(pd.qcut(pred, 10))["residu"].mean()   # déciles
 df.groupby(pd.cut(df["x"], [0, 75, 150, 1000]))  # bornes choisies
 ```
 
+**`loc` vs `iloc`**
+
+`loc` travaille par **étiquettes**, `iloc` par **positions**, sur les deux axes. Pas de
+mélange : `df.iloc[1, "name"]` lève une erreur.
+
+```python
+df.loc[1, "name"]      # étiquette de ligne 1, colonne nommée
+df.iloc[1, 0]          # 2e ligne, 1re colonne
+df["name"].iloc[1]     # le mélange qu'on veut souvent : colonne nommée, puis position
+```
+
+- **`loc` inclut la borne de fin**, seule exception au slicing Python.
+  `df.loc[:2]` → 3 lignes · `df.iloc[:2]` → 2 lignes.
+  La raison : une étiquette n'a pas toujours de prédécesseur (`df.loc[:"Pape"]`).
+- Les deux se confondent tant que l'index est `0, 1, 2…`. **Après un filtrage, les
+  étiquettes survivent mais les positions se renumérotent** : sur un `df` filtré gardant
+  les lignes 0 et 2, `loc[2]` marche et `iloc[2]` lève une `IndexError`.
+  → `.loc` pour un identifiant, `.iloc` pour un rang. `reset_index(drop=True)` pour
+  réaligner les deux.
+- `KeyError` avec un nombre entre crochets = un `loc` là où il fallait un `iloc`.
+
 **Pièges Pandas**
 
+- `count()` compte les valeurs **non manquantes**, `size()` compte les **lignes**.
+  Leur écart donne le nombre de `nan` — le moyen le plus rapide de voir où sont les trous
+  après un `groupby`. (`df.size` sans parenthèses = nombre total de cellules, sans rapport.)
 - `mean()` **ignore** les `nan` par défaut : le dénominateur change sans avertissement.
-  `mean(skipna=False)` force la propagation ; `count()` donne le nombre de valeurs présentes.
+  `mean(skipna=False)` force la propagation. D'où le `count`, toujours, à côté d'une
+  moyenne.
 - Une seule valeur manquante fait passer une colonne d'entiers en `float64`
   (`nan` est un flottant).
-- `size()` compte les **lignes**, les agrégations numériques ne comptent que les
-  valeurs **présentes** : comparer les deux révèle où sont les trous.
-- Une moyenne sur 1 élément s'affiche comme les autres. D'où le `count`, toujours.
 - `pd.get_dummies` : les lignes dont la colonne catégorielle vaut `nan` reçoivent des
   zéros partout — donc exactement le codage de la modalité de référence. Aucun
   avertissement, coefficient de référence biaisé.
