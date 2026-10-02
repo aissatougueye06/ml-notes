@@ -443,14 +443,13 @@ df["name"].iloc[1]     # le mélange qu'on veut souvent : colonne nommée, puis 
 
 **Pièges Pandas**
 
-- `count()` compte les valeurs **non manquantes**, `size()` compte les **lignes**.
-  Leur écart donne le nombre de `nan` — le moyen le plus rapide de voir où sont les trous
-  après un `groupby`. (`df.size` sans parenthèses = nombre total de cellules, sans rapport.)
 - `mean()` **ignore** les `nan` par défaut : le dénominateur change sans avertissement.
-  `mean(skipna=False)` force la propagation. D'où le `count`, toujours, à côté d'une
-  moyenne.
+  `mean(skipna=False)` force la propagation ; `count()` donne le nombre de valeurs présentes.
 - Une seule valeur manquante fait passer une colonne d'entiers en `float64`
   (`nan` est un flottant).
+- `size()` compte les **lignes**, les agrégations numériques ne comptent que les
+  valeurs **présentes** : comparer les deux révèle où sont les trous.
+- Une moyenne sur 1 élément s'affiche comme les autres. D'où le `count`, toujours.
 - `pd.get_dummies` : les lignes dont la colonne catégorielle vaut `nan` reçoivent des
   zéros partout — donc exactement le codage de la modalité de référence. Aucun
   avertissement, coefficient de référence biaisé.
@@ -493,18 +492,60 @@ np.where(a > 5, a, 0)           # remplacer
 
 **À retenir**
 
-- `axis` = **l'axe qui disparaît**. Une agrégation réduit d'une dimension.
-- Broadcasting : formes alignées **à partir de la droite**, compatibles si égales
-  ou si l'une vaut 1.
 - `(3,)` n'a **pas d'orientation** : `ndim == 1`, ni ligne ni colonne. Ligne et colonne
   n'existent qu'en 2D — `(1,3)` est une ligne, `(3,1)` une colonne. L'affichage
   horizontal de NumPy (`array([1, 2, 3])`) est trompeur sur ce point.
   → `v[None, :]` et `v[:, None]` quand l'orientation doit être explicite.
+- Broadcasting : formes alignées **à partir de la droite**, compatibles si égales
+  ou si l'une vaut 1. Un tableau de moindre dimension est complété **par la gauche**
+  avec des 1 : `(3,)` → `(1,3)`. On aligne à droite, on complète à gauche.
+  Vaut pour **toutes** les opérations terme à terme : `+ - * / **`, comparaisons,
+  `np.sqrt` et consorts.
+- `(1,3) * (3,1)` → `(3,3)` **sans erreur** : chacun s'étire là où l'autre vaut 1.
+  Bug silencieux classique quand un `reshape(-1,1)` traîne — on attendait 3 valeurs,
+  on en obtient 9, et ça n'explose que bien plus loin.
+
+```python
+A = np.arange(6).reshape(2, 3)   # (2,3)
+B = np.arange(3)                 # (3,)  → (1,3) : se comporte en ligne
+C = np.arange(3).reshape(-1, 1)  # (3,1)         : colonne explicite
+
+A * B    # ✓ (2,3)   3 vs 3 → chaque ligne de A multipliée terme à terme
+A * C    # ✗ erreur  2 vs 3 sur la 1re dimension
+B * C    # ✓ (3,3)   le piège : les deux s'étirent, 3 valeurs en donnent 9
+```
+
+- `@` suit une règle **autre** que le broadcasting : **colonnes de A = lignes de B**.
+  `(m,n) @ (n,p)` → `(m,p)`. C'est la dimension **intérieure** qui doit correspondre,
+  `m` et `p` sont libres. Non commutatif. (Au-delà de 2D, `@` diffuse les dimensions de
+  tête : un lot de matrices contre une seule.)
 - Seul `@` donne une orientation à un 1D, celle qui rend le produit valide :
   `A @ v` le traite en colonne, `v @ A` en ligne. Le broadcasting, lui, l'aligne
-  toujours à droite — donc comme une ligne.
+  toujours à droite — donc comme une ligne. La dimension ajoutée par `@` disparaît du
+  résultat : `(2,3) @ (3,)` → `(2,)`, pas `(2,1)`. Hors matrice carrée, ce n'est même
+  pas le même vecteur : `A (2,3)` exige un `v` de longueur 3 à droite, 2 à gauche.
+
+```python
+# (m, n) @ (n, p) → (m, p)       seule la dimension intérieure est contrainte
+A = np.arange(6).reshape(2, 3)    # (2,3)
+B = np.arange(12).reshape(3, 4)   # (3,4)
+
+A @ B    # ✓ (2,4)   3 = 3
+B @ A    # ✗ erreur  4 ≠ 2 — @ n'est pas commutatif
+
+# un 1D prend l'orientation qui rend le produit valide
+M = np.arange(9).reshape(3, 3)    # [[0,1,2], [3,4,5], [6,7,8]]
+v = np.array([1, 0, 0])           # (3,)
+
+M @ v    # v en colonne : (3,3) @ (3,1) → (3,) = [0, 3, 6]  ← 1re COLONNE de M
+v @ M    # v en ligne   : (1,3) @ (3,3) → (3,) = [0, 1, 2]  ← 1re LIGNE de M
+```
+
+Même forme en sortie, **valeurs différentes** : rien ne signale l'inversion.
+
 - `*` sur une **liste** Python répète la séquence ; sur un **array**, il multiplie.
   Même symbole, sens opposé.
+- `axis` = **l'axe qui disparaît**. Une agrégation réduit d'une dimension.
 - Un tableau vide (`shape (0,)`) ne lève pas d'erreur au filtrage — il explose plus loin.
 - `np.full_like(a, valeur)` hérite du **dtype** de `a` : une moyenne placée dans un
   tableau d'entiers est tronquée sans avertissement.
@@ -526,6 +567,13 @@ y_pred = model.predict(X)
 mean_absolute_error(y, y_pred)   # erreur moyenne, dans l'unité de la cible
 r2_score(y, y_pred)              # part de variation expliquée
 ```
+
+**Formes attendues** : `X` en 2D `(n, p)`, `y` en 1D `(n,)`. L'asymétrie est volontaire
+mais se retourne contre soi : `df[["co2"]]` ou `.values` sur un DataFrame à une colonne
+produisent du `(n,1)`. Un `y` en `(n,1)` déclenche un `DataConversionWarning` — à ne pas
+ignorer, car `y - y_pred` avec une forme plate de l'autre côté donne une matrice `(n,n)`
+par broadcasting (§4), sans erreur, et la métrique qui suit est calculée sur du vide.
+→ `y.ravel()` pour revenir en `(n,)`.
 
 Versions vectorisées des fonctions du cours :
 
