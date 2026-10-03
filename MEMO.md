@@ -616,16 +616,55 @@ b_orig = b - w * mu / sigma
 Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=0)
 m = LinearRegression().fit(Xtr, ytr)
 r2_score(yte, m.predict(Xte))
-
-# Référence naïve : prédire la moyenne pour tout le monde
-mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
 ```
+
+**Lire les métriques**
+
+```
+MAE  = moyenne(|erreur|)      toutes les erreurs au même poids
+RMSE = √(moyenne(erreur²))    le carré pèse les grosses erreurs
+```
+
+- **MAE** : erreur moyenne de prédiction, dans l'unité de la cible — « je me trompe de
+  12 g/km en moyenne ». À ne pas confondre avec `coef_` : la MAE mesure le **modèle**,
+  le coefficient décrit le **phénomène** (variation de y pour une unité de x). Les deux
+  s'expriment en grammes, d'où la confusion facile.
+- **R²** : part de la variation expliquée. `1` = parfait, `0` = équivalent à prédire la
+  moyenne, **négatif** = pire qu'elle — possible, et pas un bug : modèle mal spécifié, ou
+  test trop éloigné de l'entraînement. Juge le couple **modèle-données** : 0,6 peut être
+  excellent sur un phénomène bruité et médiocre sur une relation quasi déterministe.
+- **RMSE** = √(moyenne des erreurs²), même unité que la cible. L'écart **RMSE − MAE**
+  mesure l'irrégularité des erreurs : s'il est grand, quelques prédictions ratent très
+  largement — aller les regarder (`nlargest` sur le résidu absolu). `MSE = J × 2`, la
+  RMSE en est la racine : c'est la MSE que la descente de gradient minimise, pas la MAE
+  qu'on affiche.
+
+```python
+from sklearn.metrics import root_mean_squared_error
+root_mean_squared_error(y, y_pred)
+# mean_squared_error(..., squared=False) : supprimé depuis scikit-learn 1.6
+```
+
+- Toujours comparer à une **référence naïve** (`DummyRegressor`, ou prédire
+  `ytr.mean()` partout) : une MAE seule ne veut rien dire, un rapport à la référence, si. Ce n'est pas le pire modèle possible (un R² négatif fait
+  pire), c'est un **seuil d'utilité** : au-dessus, le modèle n'apporte rien. Sa moyenne vient de
+  `ytr`, jamais de `yte` — un modèle n'a pas accès au test. Même logique qu'un
+  `StandardScaler` ajusté sur l'entraînement.
+
+```python
+# prédire la moyenne pour tout le monde
+mean_absolute_error(yte, np.full(yte.shape, ytr.mean()))
+
+from sklearn.dummy import DummyRegressor               # même chose, forme explicite
+naif = DummyRegressor(strategy="mean").fit(Xtr, ytr)   # s'utilise comme un modèle,
+mean_absolute_error(yte, naif.predict(Xte))            # donc comparable en boucle
+```
+
+**Pièges de la régression multiple**
 
 - Ajouter une variable ne peut **jamais** faire baisser le R² d'entraînement.
   Dès que le nombre de paramètres varie d'un modèle à l'autre, il cesse d'être un
   critère de comparaison → jeu de test, ou R² ajusté.
-- Toujours comparer à une **référence naïve**. Une MAE seule ne veut rien dire ;
-  un rapport à la référence, si.
 - `R²(A) + R²(B) ≠ R²(A, B)` dès que A et B sont corrélées : l'information est
   partagée, pas additive. Le bon indicateur est le **gain incrémental**, pas le R²
   de chaque variable prise seule.
