@@ -598,6 +598,38 @@ w_orig = w / sigma
 b_orig = b - w * mu / sigma
 ```
 
+**Normaliser ou non**
+
+- **Inutile** : `LinearRegression` — standardiser une entrée n'est qu'un changement de
+  repère, que le coefficient compense exactement (vérifié : écart de 4e-16 sur la MAE).
+  Inutile aussi pour les **arbres**, qui coupent sur des seuils transposables à toute
+  échelle.
+- **Nécessaire** : **régularisation** (`Ridge`, `Lasso` — la pénalité porte sur la taille
+  des coefficients, donc sur l'échelle des variables) et méthodes à **distances** (KNN,
+  SVM, k-means — une variable en milliers écrase une variable en dixièmes). Là, sans
+  normalisation le résultat est *faux*, pas seulement lent.
+- **Fortement recommandé** : descente de gradient (`SGDRegressor`, réseaux) — converge
+  mal ou lentement sans, mais converge.
+- **La cible, presque jamais** : elle n'entre ni dans une distance ni dans une pénalité,
+  et une MAE normalisée n'est plus interprétable. Exceptions : réseaux de neurones,
+  cibles très asymétriques (plutôt un log). → `TransformedTargetRegressor`, qui applique
+  l'inverse avant l'évaluation.
+
+Le `(x - mu) / sigma` ci-dessus éclaire le mécanisme ; en pratique, `StandardScaler`.
+
+```python
+scaler = StandardScaler()
+Xtr_scaled = scaler.fit_transform(Xtr)   # fit sur l'entraînement SEUL
+Xte_scaled = scaler.transform(Xte)       # transform sur les deux
+```
+
+- **Fuite de données** : en validation croisée, le scaler doit être réajusté à **chaque
+  pli**. Un `fit_transform` sur tout `X` avant la découpe fait entrer l'information du pli
+  de validation dans la moyenne et l'écart-type — scores optimistes, aucun signal.
+  → `make_pipeline(StandardScaler(), Ridge())` puis `cross_val_score(pipe, X, y, cv=5)`.
+- L'autre raison du pipeline — un modèle ajusté sur données normalisées et appliqué à des
+  données brutes ne lève **aucune erreur** — est le *train/serve skew* du §9.3.
+
 **À retenir**
 
 - Vocabulaire : **modèle** = `f`, **algorithme d'apprentissage** = descente de gradient,
@@ -617,6 +649,12 @@ Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, random_state=0)
 m = LinearRegression().fit(Xtr, ytr)
 r2_score(yte, m.predict(Xte))
 ```
+
+**Choisir ses métriques** — c'est le **type de sortie** qui commande, pas l'algorithme.
+Régression (prédire un nombre) → MAE, RMSE, R². Classification (prédire une catégorie)
+→ `accuracy_score`, `precision_score`, `recall_score`, `f1_score`, `confusion_matrix`,
+`roc_auc_score`. Un même algorithme existe souvent dans les deux versions :
+`DecisionTreeRegressor` / `DecisionTreeClassifier` — le suffixe tranche.
 
 **Lire les métriques**
 
