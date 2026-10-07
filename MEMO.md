@@ -107,6 +107,12 @@ Dès qu'on assigne à un nom dans une fonction, Python le traite comme local **s
 fonction**, y compris avant l'assignation.
 → Nommer le résultat autrement (`valeur = predire(...)`).
 
+### `SyntaxError: non-default argument follows default argument`
+Un paramètre sans valeur par défaut placé après un paramètre qui en a une.
+Levée à la **lecture** du fichier, avant toute exécution — donc même si la fonction
+n'est jamais appelée.
+→ Remonter les paramètres obligatoires avant ceux qui ont un défaut.
+
 ### `Multiple top-level modules discovered in a flat-layout`
 Des `.py` traînent à la racine du projet : setuptools ne sait pas lequel est le paquet.
 Arrive typiquement après un téléchargement fichier par fichier, qui aplatit l'arborescence.
@@ -608,6 +614,10 @@ b_orig = b - w * mu / sigma
   des coefficients, donc sur l'échelle des variables) et méthodes à **distances** (KNN,
   SVM, k-means — une variable en milliers écrase une variable en dixièmes). Là, sans
   normalisation le résultat est *faux*, pas seulement lent.
+  ⚠️ `LogisticRegression` est régularisée **L2 par défaut** (`C=1.0`), contrairement à
+  `LinearRegression` : elle appartient à cette case, pas à la précédente. Pour l'en
+  sortir explicitement, `penalty=None`. Le piège se referme quand un même pipeline sert
+  les deux estimateurs — seul l'un des deux est sensible à l'échelle, et rien ne le dit.
 - **Fortement recommandé** : descente de gradient (`SGDRegressor`, réseaux) — converge
   mal ou lentement sans, mais converge.
 - **La cible, presque jamais** : elle n'entre ni dans une distance ni dans une pénalité,
@@ -630,11 +640,63 @@ Xte_scaled = scaler.transform(Xte)       # transform sur les deux
 - L'autre raison du pipeline — un modèle ajusté sur données normalisées et appliqué à des
   données brutes ne lève **aucune erreur** — est le *train/serve skew* du §9.3.
 
+**Composer un pipeline**
+
+```python
+# Pipeline         : étapes SÉQUENTIELLES — la sortie de l'une est l'entrée de la suivante
+# ColumnTransformer : branches PARALLÈLES — chacune ses colonnes, sorties concaténées
+# Dans les deux cas : une liste de paires (nom, objet). Rien n'est imbriqué.
+preparation = ColumnTransformer([
+    ("masse",     "passthrough",                       ["masse_ordma_min"]),
+    ("puissance", PolynomialFeatures(degree=2, include_bias=False), ["puiss_max"]),
+    ("boite",     OneHotEncoder(handle_unknown="ignore", drop="first",
+                                sparse_output=False),  ["typ_boite_nb_rapp"]),
+])                                                      # (nom, objet, colonnes)
+
+Pipeline([("preparation", preparation),
+          ("scale",       StandardScaler()),
+          ("estimateur",  estimateur)])                 # (nom, objet)
+```
+
+Ce que le pipeline fait à ma place — et qu'il est donc inutile d'appeler soi-même :
+
+```
+fit(Xtr, ytr) : fit_transform sur chaque étape sauf la dernière, puis fit
+predict(Xte)  : transform     sur chaque étape sauf la dernière, puis predict
+→ la fuite du bullet précédent devient structurellement impossible
+```
+
+- Les noms d'étapes deviennent les **préfixes d'hyperparamètres**, séparateur double
+  underscore : `estimateur__alpha`, `preparation__puissance__degree`. Les choisir en
+  pensant à la `GridSearchCV` qui viendra.
+- Une branche du `ColumnTransformer` qui a besoin de deux étapes devient un `Pipeline`
+  imbriqué — c'est la seule imbrication légitime.
+- **Où placer le scaler** : une étape globale après le `ColumnTransformer` est le plus
+  simple, mais les indicatrices sont centrées-réduites aussi → un coefficient ne se lit
+  plus « effet de passer de 0 à 1 », et une modalité rare (σ petit) voit son `1` amplifié.
+  Scalers branche par branche = indicatrices intactes, coefficients lisibles, au prix de
+  la verbosité. Tant qu'on ne lit pas les coefficients, la version globale suffit.
+
+**Transformateur ou prédicteur — qui a quelles méthodes**
+
+```
+transformateur (StandardScaler, OneHotEncoder, ColumnTransformer) : fit / transform, pas de predict
+prédicteur     (LinearRegression, DummyRegressor)                 : fit / predict,   pas de transform
+
+fit       = apprendre ses paramètres internes — μ et σ, la liste des modalités, les coefficients
+transform = appliquer ce qui a été appris, sans rien réapprendre
+```
+
+`fit` renvoie l'objet lui-même, d'où `dummy.fit(Xtr, ytr).predict(Xte)` en une ligne.
+`fit_transform` = les deux sur les mêmes données : réservé à l'entraînement, jamais au test.
+
 **À retenir**
 
 - Vocabulaire : **modèle** = `f`, **algorithme d'apprentissage** = descente de gradient,
-  **entraînement** = le `.fit()`. Les paramètres (`w`, `b`) sont appris ;
-  les hyperparamètres (α) sont choisis.
+  **entraînement** = le `.fit()` d'un prédicteur. Les paramètres (`w`, `b`) sont appris ;
+  les hyperparamètres (α) sont choisis. Attention : `.fit()` ne veut pas dire
+  « entraîner » mais « apprendre ses paramètres internes » — `StandardScaler().fit()`
+  n'entraîne rien, il mémorise μ et σ.
 - Le `1/2` du coût n'a aucun sens statistique : il simplifie la dérivée. `J × 2` = MSE.
 - Toujours mettre à jour `w` et `b` **simultanément** (calculer les deux gradients avant).
 - Diagnostic de base : tracer le coût en fonction des itérations. Il doit décroître.
@@ -711,6 +773,11 @@ mean_absolute_error(yte, naif.predict(Xte))            # donc comparable en bouc
 - Encoder une catégorie : le one-hot brut laisse chaque modalité libre ; décomposer
   (`"A 8"` → type + nombre de rapports) impose linéarité **et** additivité. Moins de
   colonnes, moins de gain — l'arbitrage se mesure, il ne se devine pas.
+- `OneHotEncoder(handle_unknown="ignore")` : une modalité absente de l'entraînement
+  produit une ligne de zéros au `transform`, au lieu de lever. Combiné à `drop="first"`,
+  c'est exactement la sortie de la modalité de référence — inconnu et référence
+  deviennent indiscernables. Même mécanisme que le `nan` de `get_dummies` (§3), côté
+  scikit-learn : aucune erreur, juste une prédiction fausse.
 
 ---
 
