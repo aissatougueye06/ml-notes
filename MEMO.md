@@ -113,6 +113,22 @@ Levée à la **lecture** du fichier, avant toute exécution — donc même si la
 n'est jamais appelée.
 → Remonter les paramètres obligatoires avant ceux qui ont un défaut.
 
+### `TypeError: unsupported operand type(s) for |: 'NoneType' and 'str'`
+Un `|` de type écrit à **droite** du `=` : `stratify: str = None | 'y'`. À gauche c'est une
+annotation (union de types), à droite c'est une opération réelle, exécutée.
+→ L'union va dans l'annotation ; la valeur par défaut est **une** valeur concrète.
+→ Contraindre des **valeurs** et non des types (`None` ou littéralement `'y'`) :
+`None | Literal['y']` — `Literal` vient de `typing`.
+
+### `B008 Do not perform function call in argument defaults` (ruff)
+`estimateur: RegressorMixin = LinearRegression()` : l'instance est créée **une fois**, à la
+lecture du fichier, et partagée par tous les appels. Même piège que les listes mutables.
+→ Deux corrections admises : `None` par défaut puis instancier dans le corps, ou une
+constante de module (`ESTIMATEUR_DEFAUT = LinearRegression()`).
+→ Piège : passer la **classe** (`= LinearRegression`) fait taire ruff mais interdit à
+l'appelant de configurer ses hyperparamètres — `Ridge(alpha=0.5)` lève alors, puisqu'une
+instance n'est pas appelable. Ce n'est pas une des deux corrections.
+
 ### `Multiple top-level modules discovered in a flat-layout`
 Des `.py` traînent à la racine du projet : setuptools ne sait pas lequel est le paquet.
 Arrive typiquement après un téléchargement fichier par fichier, qui aplatit l'arborescence.
@@ -413,6 +429,8 @@ df[df["a"].isin(["x", "y"])]
 # Agréger — TOUJOURS count à côté de mean
 df.groupby("cat")["val"].agg(["mean", "count", "std"]).sort_values("mean")
 df.groupby("cat")[["a", "b"]].count()   # croiser avec les manquantes
+df.groupby(CLES)["col"].nunique()       # combien de valeurs DIFFÉRENTES par groupe
+df.groupby(CLES)["col"].transform("nunique")   # le même résultat, aligné sur les lignes
 
 # Inspecter
 df.nlargest(10, "col")
@@ -465,6 +483,15 @@ df["name"].iloc[1]     # le mélange qu'on veut souvent : colonne nommée, puis 
 - Tout filtre en amont définit un **périmètre**, qui doit être annoncé.
   `df[df["energ"] == "ES"]` exclut aussi les hybrides, qui ont leur propre code.
   → `value_counts()` sur la colonne **avant** de filtrer, pour voir ce qu'on écarte.
+- `pd.cut` avec une borne basse à `0` : les intervalles sont ouverts à gauche — `(0, 5]`.
+  Les valeurs valant **exactement** la borne deviennent `nan`, et `groupby` les ignore sans
+  rien signaler. → `include_lowest=True`, ou une borne sous le minimum.
+  Vérification systématique : la somme des effectifs doit retomber sur le total.
+- `size` compte les lignes, `count` les non-nulles, `nunique` les valeurs **distinctes** :
+  aucune des deux premières ne répond à « combien de valeurs différentes ».
+- Assigner un `ndarray` à une colonne aligne par **position** ; assigner une `Series` aligne
+  par **index**. Mélanger les deux après un filtrage est une source d'erreur muette.
+  (`pipe.predict()` renvoie toujours un `ndarray`, jamais une `Series`.)
 
 ---
 
@@ -760,6 +787,52 @@ naif = DummyRegressor(strategy="mean").fit(Xtr, ytr)   # s'utilise comme un mod�
 mean_absolute_error(yte, naif.predict(Xte))            # donc comparable en boucle
 ```
 
+**Lire les métriques — classification**
+
+Tout se joue sur le **dénominateur**, c'est-à-dire sur l'ensemble d'où part la question.
+
+```
+              y_pred=True   y_pred=False
+y=True            VP            FN        ← cas manqués
+y=False           FP            VN
+                   ↑ fausses alertes
+
+Accuracy  = (VP+VN) / tout    part de bonnes réponses, les deux classes confondues
+Precision = VP / (VP+FP)      « quand j'annonce positif, ai-je raison ? »  ← part du PRÉDIT
+Recall    = VP / (VP+FN)      « parmi les vrais positifs, combien trouvés ? » ← part du RÉEL
+F1        = 2PR / (P+R)       moyenne HARMONIQUE : élevée seulement si les deux le sont
+```
+
+- La moyenne harmonique punit le déséquilibre, là où une moyenne ordinaire le masquerait :
+  precision 100 % et recall 1 % donnent 50,5 % en moyenne simple, mais **2 % de F1**.
+- F1 n'est la bonne métrique que si les deux erreurs coûtent pareil. Sinon `fbeta_score`
+  (`beta > 1` favorise le recall, `beta < 1` la precision), ou simplement la métrique qui
+  correspond au coût réel.
+- **F1 ignore complètement les vrais négatifs** : elle ne regarde qu'autour de la classe
+  positive. L'accuracy les compte — les deux sont complémentaires, pas redondantes.
+- Aucun **seuil universel** de « bon F1 ». Un F1 ne se lit que contre quelque chose : la
+  référence naïve, le plancher d'erreur des données, l'état de l'art du problème, le besoin
+  métier. 60 % est excellent en détection de fraude, médiocre en reconnaissance de chiffres.
+- Un F1 anormalement élevé : chercher la fuite avant de se réjouir.
+
+```python
+# référence naïve en classification — pendant du DummyRegressor
+naif = DummyClassifier(strategy="most_frequent").fit(Xtr, ytr)
+```
+
+- Piège du naïf en classification : son **accuracy** vaut la part de la classe majoritaire,
+  mais son **F1 n'est pas bas**. Avec 57 % de positifs il prédit `True` partout : recall
+  100 %, precision 57 %, donc **F1 ≈ 72,6 %**. Un modèle à 87 % gagne 14 points, pas 30.
+  → Calculer le F1 du naïf, pas seulement son accuracy, sinon le gain est surestimé.
+- `stratify` reçoit **les données** (un vecteur de même longueur que `X`), jamais un nom de
+  colonne : `train_test_split(d, stratify=d[CIBLE])`. Conserve les proportions des classes
+  entre entraînement et test — nécessaire dès que les classes sont déséquilibrées.
+- `clone()` (`sklearn.base`) : copie non entraînée, mêmes hyperparamètres. Placé dans la
+  fabrique de pipeline, il protège aussi l'appelant qui réutilise sa propre instance.
+- `RegressorMixin` / `ClassifierMixin` sont plus précis que `BaseEstimator`, qui accepte
+  aussi un `KMeans` ou un `StandardScaler`. Confort de typage statique : aucun effet à
+  l'exécution.
+
 **Pièges de la régression multiple**
 
 - Ajouter une variable ne peut **jamais** faire baisser le R² d'entraînement.
@@ -792,6 +865,17 @@ mean_absolute_error(yte, naif.predict(Xte))            # donc comparable en bouc
 - Une cellule = une idée. Seule la dernière expression s'affiche
   (sinon `display()` ou séparer).
 - Markdown avant le code (ce que je cherche), Markdown après la sortie (ce que j'y lis).
+- **Une affirmation dont la preuve n'est pas dans le notebook n'est pas une preuve.**
+  Conclure « non significatif » à partir de trois tirages exige que les trois tirages soient
+  exécutés dans une cellule, pas gardés de tête.
+- Un chiffre mesuré sur **un** tirage n'est pas un énoncé général. « F1 identique » était
+  vrai à `random_state=0` et faux à 1. Formuler ce que la mesure établit vraiment.
+- Ne pas écrire ses résultats dans le DataFrame qui **alimente** le modèle :
+  `analyse = d_te.copy()`. Rien ne casse aujourd'hui, mais une cellule relancée dans le
+  désordre, ou une colonne ajoutée plus tard aux caractéristiques, crée une fuite muette.
+- On copie l'objet qu'on s'apprête à **modifier**, pas celui qu'on lit.
+  `d[c] = d[a].copy() > s` fabrique une copie, la compare, la jette — et ne protège rien ;
+  c'est `d[c] = ...` qui écrit.
 
 ---
 
@@ -870,6 +954,31 @@ mean_absolute_error(yte, naif.predict(Xte))            # donc comparable en bouc
 - Un modèle ne peut pas être meilleur que ses variables. Quand deux objets que tout
   sépare en réalité sont identiques dans le tableau, l'erreur est irréductible :
   c'est une limite de données, pas d'algorithme.
+- **Avant de lancer une vérification : quel résultat m'aurait alertée ?** Si aucun ne le
+  pouvait, la mesure est décorative. Trois formes rencontrées le même jour — compter les
+  valeurs distinctes d'une colonne **incluse dans la clé de groupement** (toujours 1) ;
+  mesurer ce qu'un dédoublonnage détruit **après** l'avoir appliqué ; comparer deux états du
+  code alors que le changement ne pouvait rien déplacer.
+  → Mesurer avant l'étape qu'on veut évaluer, et sur la table qu'elle reçoit.
+- **Grouper sur exactement ce que le modèle voit.** Une clé à la fois trop stricte (marque,
+  modèle — absents du modèle) et trop lâche (boîte, carburant — présents dedans) produit un
+  chiffre qui ne répond à aucune question. Pour mesurer l'erreur irréductible, la clé est
+  la liste des caractéristiques, rien d'autre.
+- **Deux modèles ne se comparent que sur le même découpage.** Deux appels à
+  `train_test_split` = deux jeux de test = métriques non comparables, et impossible de dire
+  « sur quels individus ». → Découper une fois en amont, passer `d_tr` / `d_te`.
+- **Un écart plus petit que la variation d'un tirage à l'autre n'est pas un écart.**
+  Rejouer sur 3 `random_state` avant de conclure. Ce qui se répète dans le même sens aux
+  trois tirages est une propriété ; ce qui change de signe est du bruit — c'est aussi ainsi
+  qu'un résultat **négatif** se démontre (aucun biais par catégorie : le signe s'inverse).
+- **Décision par seuil : chercher le régime, pas la moyenne.** Quand une décision binaire
+  dérive d'une grandeur continue, les erreurs se concentrent près du seuil — 41 % d'erreur
+  à moins de 5 g, 3 % au-delà de 20 g, un facteur 12 à 15. Un score global de 85 % moyennait
+  deux régimes : fiable loin de la frontière, quasi aléatoire à moins de 5 g.
+  → Généralisable : chercher la variable le long de laquelle le taux d'erreur varie.
+- **Une prédiction près du seuil n'est pas une valeur réelle près du seuil.** Un véhicule à
+  216 g estimé à 132 g tombe du bon côté par chance. La distance au seuil est une mesure de
+  confiance utile, pas une garantie.
 
 ---
 
@@ -885,6 +994,28 @@ deviennent des défauts dans un module.
 | la fonction lit `df` global | `df` passe en argument | sinon intestable, et casse au premier import |
 | `print(...)` | `return ...` | un print est invisible depuis un test |
 | on modifie le DataFrame en place | `.copy()` d'abord | un effet de bord en production est un bug qui ne se reproduit pas |
+
+**Concevoir la signature**
+
+- **Rendre les combinaisons invalides inexprimables plutôt que les valider.** Plusieurs
+  paramètres qui doivent s'accorder entre eux, c'est autant d'appels invalides possibles.
+  Deux fonctions spécialisées, enveloppes fines autour d'un cœur commun, suppriment le
+  problème : ce qui était un paramètre devient **fixé par le choix de la fonction**, et le
+  nom de la fonction dit l'intention que trois arguments obligeaient à reconstituer.
+  Signal d'alerte : écrire un deuxième `if` de cohérence.
+- **Ne pas factoriser trop tôt.** Deux fonctions lisibles de quinze lignes valent mieux
+  qu'une abstraction prématurée. Attendre la troisième variante, ou la première
+  modification à répercuter deux fois.
+- **Placer une garantie au point de passage le plus étroit**, pas chez chaque appelant :
+  elle couvre alors aussi le code écrit plus tard, sans dépendre de la discipline de qui
+  l'écrira. Contrepartie : la fonction ne fait plus seulement ce que son nom dit — à écrire
+  dans la docstring.
+- **Un paramètre drapeau n'est pas une donnée.** « Oui, stratifie » côté appelant, un
+  vecteur de labels côté scikit-learn : il faut une traduction explicite dans le corps, pas
+  un drapeau transmis tel quel.
+- **Une docstring fausse est pire qu'absente** : elle fait perdre du temps au lecteur qui
+  lui fait confiance. Ne pas paraphraser la signature — y écrire ce qu'elle ne dit pas :
+  d'où viennent les colonnes, ce que contient le tuple retourné, les effets non évidents.
 
 ### 9.2 — Tester avec pytest
 
