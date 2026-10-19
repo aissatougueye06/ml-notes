@@ -27,6 +27,10 @@ Transformer (attention), sans rapport.
 - **Pipeline** — objet qui enchaîne préparation et modèle. Un seul `.fit()`, un seul
 `.predict()`, un seul fichier sérialisé. Toutes les étapes sauf la dernière sont des
 transformateurs ; la dernière est un prédicteur.
+- **Stratification** (`train_test_split(..., stratify=y)`) — découpage qui conserve les
+proportions des classes dans chaque sous-ensemble : 57 % de positifs dans le jeu complet,
+donc 57 % en entraînement comme en test. Ne rééquilibre rien — à ne pas confondre avec
+`class_weight` ou le rééchantillonnage, qui eux corrigent le déséquilibre.
 - **Sérialiser** — écrire un objet Python dans un fichier ; **désérialiser**, le relire.
 `joblib` pour les modèles.
 - **Artefact** — fichier produit par le code et régénérable : un modèle `.joblib`. Hors Git.
